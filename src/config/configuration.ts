@@ -26,9 +26,7 @@ export default () => ({
   },
 
   catenoid: {
-    apiBaseUrl:
-      process.env.CATENOID_API_BASE_URL ??
-      'https://api.kollus.com',
+    apiBaseUrl: process.env.CATENOID_API_BASE_URL ?? 'https://api.kollus.com',
     serviceAccountKey: process.env.CATENOID_SERVICE_ACCOUNT_KEY ?? '',
     apiAccessToken: process.env.CATENOID_API_ACCESS_TOKEN ?? '',
     customKey: process.env.CATENOID_CUSTOM_KEY ?? '',

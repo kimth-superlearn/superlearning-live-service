@@ -1,4 +1,9 @@
-import { Injectable, UnauthorizedException, ConflictException, Inject } from '@nestjs/common';
+import {
+  Injectable,
+  UnauthorizedException,
+  ConflictException,
+  Inject,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as argon2 from 'argon2';
 import { eq } from 'drizzle-orm';
@@ -65,7 +70,12 @@ export class AuthService {
 
     return {
       accessToken: this.jwtService.sign(payload),
-      user: { id: user.id, email: user.email, name: user.name, role: user.role },
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+      },
     };
   }
 

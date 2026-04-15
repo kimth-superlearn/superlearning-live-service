@@ -9,8 +9,6 @@ import {
   Res,
   UseGuards,
   Logger,
-  ParseIntPipe,
-  Header,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -125,7 +123,9 @@ export class MediaController {
   // ─── Local File Stream (Range-based) ───────────────
 
   @Get('stream/:filename')
-  @ApiOperation({ summary: 'Stream a local file with HTTP Range support (Fastify)' })
+  @ApiOperation({
+    summary: 'Stream a local file with HTTP Range support (Fastify)',
+  })
   @ApiParam({ name: 'filename', description: 'File name in storage directory' })
   async streamFile(
     @Param('filename') filename: string,
@@ -135,7 +135,7 @@ export class MediaController {
     const storagePath = join(process.cwd(), 'storage');
     const filePath = join(storagePath, filename);
 
-    let stat;
+    let stat: import('node:fs').Stats;
     try {
       stat = statSync(filePath);
     } catch {

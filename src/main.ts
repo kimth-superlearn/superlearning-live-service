@@ -18,7 +18,9 @@ async function bootstrap() {
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle('SuperLearning Live Service')
-    .setDescription('Live & VOD Streaming API with Catenoid (Kollus) integration')
+    .setDescription(
+      'Live & VOD Streaming API with Catenoid (Kollus) integration',
+    )
     .setVersion('0.1.0')
     .addBearerAuth()
     .build();
@@ -27,4 +29,8 @@ async function bootstrap() {
 
   await app.listen(process.env.PORT ?? 3000, '0.0.0.0');
 }
-bootstrap();
+
+bootstrap().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

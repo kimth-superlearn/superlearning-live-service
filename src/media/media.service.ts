@@ -52,8 +52,16 @@ export class MediaService {
 
   // ─── VOD ────────────────────────────────────────────
 
-  async requestUploadToken(title: string, description: string | undefined, uploaderId: number, categoryKey?: string) {
-    const tokenData = await this.catenoidService.getUploadToken(title, categoryKey);
+  async requestUploadToken(
+    title: string,
+    description: string | undefined,
+    uploaderId: number,
+    categoryKey?: string,
+  ) {
+    const tokenData = await this.catenoidService.getUploadToken(
+      title,
+      categoryKey,
+    );
 
     const [result] = await this.db.insert(schema.videoContents).values({
       title,
@@ -77,7 +85,9 @@ export class MediaService {
     duration?: number,
     thumbnailUrl?: string,
   ) {
-    this.logger.log(`Transcode callback: key=${mediaContentKey} status=${status}`);
+    this.logger.log(
+      `Transcode callback: key=${mediaContentKey} status=${status}`,
+    );
 
     const [existing] = await this.db
       .select()
@@ -91,7 +101,8 @@ export class MediaService {
       return;
     }
 
-    const newStatus = status === 'completed' ? 'ready' as const : 'failed' as const;
+    const newStatus =
+      status === 'completed' ? ('ready' as const) : ('failed' as const);
 
     await this.db
       .update(schema.videoContents)

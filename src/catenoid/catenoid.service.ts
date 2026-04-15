@@ -32,7 +32,9 @@ export class CatenoidService {
 
   constructor(private readonly config: ConfigService) {
     this.baseUrl = this.config.get<string>('catenoid.apiBaseUrl')!;
-    this.serviceAccountKey = this.config.get<string>('catenoid.serviceAccountKey')!;
+    this.serviceAccountKey = this.config.get<string>(
+      'catenoid.serviceAccountKey',
+    )!;
     this.apiAccessToken = this.config.get<string>('catenoid.apiAccessToken')!;
   }
 
@@ -41,33 +43,33 @@ export class CatenoidService {
   async createLiveChannel(name: string): Promise<CatenoidChannelResponse> {
     this.logger.log(`Creating live channel: ${name}`);
 
-    const response = await fetch(
-      `${this.baseUrl}/0/channels`,
-      {
-        method: 'POST',
-        headers: this.buildHeaders(),
-        body: JSON.stringify({
-          name,
-          service_account_key: this.serviceAccountKey,
-        }),
-      },
-    );
+    const response = await fetch(`${this.baseUrl}/0/channels`, {
+      method: 'POST',
+      headers: this.buildHeaders(),
+      body: JSON.stringify({
+        name,
+        service_account_key: this.serviceAccountKey,
+      }),
+    });
 
-    return this.handleResponse<CatenoidChannelResponse>(response, 'createLiveChannel');
+    return this.handleResponse<CatenoidChannelResponse>(
+      response,
+      'createLiveChannel',
+    );
   }
 
   async getLiveChannel(channelKey: string): Promise<CatenoidChannelResponse> {
     this.logger.log(`Getting live channel: ${channelKey}`);
 
-    const response = await fetch(
-      `${this.baseUrl}/0/channels/${channelKey}`,
-      {
-        method: 'GET',
-        headers: this.buildHeaders(),
-      },
-    );
+    const response = await fetch(`${this.baseUrl}/0/channels/${channelKey}`, {
+      method: 'GET',
+      headers: this.buildHeaders(),
+    });
 
-    return this.handleResponse<CatenoidChannelResponse>(response, 'getLiveChannel');
+    return this.handleResponse<CatenoidChannelResponse>(
+      response,
+      'getLiveChannel',
+    );
   }
 
   async listLiveChannels(): Promise<CatenoidChannelResponse[]> {
@@ -81,16 +83,18 @@ export class CatenoidService {
       },
     );
 
-    const data = await this.handleResponse<{ items: CatenoidChannelResponse[] }>(
-      response,
-      'listLiveChannels',
-    );
+    const data = await this.handleResponse<{
+      items: CatenoidChannelResponse[];
+    }>(response, 'listLiveChannels');
     return data.items;
   }
 
   // ─── VOD ────────────────────────────────────────────
 
-  async getUploadToken(title: string, categoryKey?: string): Promise<CatenoidUploadTokenResponse> {
+  async getUploadToken(
+    title: string,
+    categoryKey?: string,
+  ): Promise<CatenoidUploadTokenResponse> {
     this.logger.log(`Requesting upload token for: ${title}`);
 
     const body: Record<string, string> = {
@@ -101,19 +105,21 @@ export class CatenoidService {
       body.category_key = categoryKey;
     }
 
-    const response = await fetch(
-      `${this.baseUrl}/0/media_auth/upload/url`,
-      {
-        method: 'POST',
-        headers: this.buildHeaders(),
-        body: JSON.stringify(body),
-      },
-    );
+    const response = await fetch(`${this.baseUrl}/0/media_auth/upload/url`, {
+      method: 'POST',
+      headers: this.buildHeaders(),
+      body: JSON.stringify(body),
+    });
 
-    return this.handleResponse<CatenoidUploadTokenResponse>(response, 'getUploadToken');
+    return this.handleResponse<CatenoidUploadTokenResponse>(
+      response,
+      'getUploadToken',
+    );
   }
 
-  async getMediaContent(mediaContentKey: string): Promise<CatenoidMediaContentResponse> {
+  async getMediaContent(
+    mediaContentKey: string,
+  ): Promise<CatenoidMediaContentResponse> {
     this.logger.log(`Getting media content: ${mediaContentKey}`);
 
     const response = await fetch(
@@ -124,10 +130,16 @@ export class CatenoidService {
       },
     );
 
-    return this.handleResponse<CatenoidMediaContentResponse>(response, 'getMediaContent');
+    return this.handleResponse<CatenoidMediaContentResponse>(
+      response,
+      'getMediaContent',
+    );
   }
 
-  async listMediaContents(page = 1, perPage = 20): Promise<{
+  async listMediaContents(
+    page = 1,
+    perPage = 20,
+  ): Promise<{
     items: CatenoidMediaContentResponse[];
     total: number;
   }> {
@@ -139,13 +151,10 @@ export class CatenoidService {
       per_page: String(perPage),
     });
 
-    const response = await fetch(
-      `${this.baseUrl}/0/media_contents?${params}`,
-      {
-        method: 'GET',
-        headers: this.buildHeaders(),
-      },
-    );
+    const response = await fetch(`${this.baseUrl}/0/media_contents?${params}`, {
+      method: 'GET',
+      headers: this.buildHeaders(),
+    });
 
     return this.handleResponse(response, 'listMediaContents');
   }
@@ -159,7 +168,10 @@ export class CatenoidService {
     };
   }
 
-  private async handleResponse<T>(response: Response, operation: string): Promise<T> {
+  private async handleResponse<T>(
+    response: Response,
+    operation: string,
+  ): Promise<T> {
     if (!response.ok) {
       const errorBody = await response.text();
       this.logger.error(
