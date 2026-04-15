@@ -26,9 +26,7 @@ on:
 
 jobs:
   deploy:
-    runs-on:
-      - self-hosted
-      - dogok-x86
+    runs-on: self-hosted
     environment: ${{ inputs.target_env }}
     permissions:
       contents: read
