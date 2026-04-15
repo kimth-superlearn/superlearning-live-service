@@ -14,15 +14,15 @@ function createMockConfig(): ConfigService {
   } as unknown as ConfigService;
 }
 
-describe('CatenoidService', () => {
+void describe('CatenoidService', () => {
   let service: CatenoidService;
 
   beforeEach(() => {
     service = new CatenoidService(createMockConfig());
   });
 
-  describe('createLiveChannel', () => {
-    it('should call Catenoid API to create a channel', async () => {
+  void describe('createLiveChannel', () => {
+    void it('should call Catenoid API to create a channel', async () => {
       const mockResponse = {
         key: 'ch-123',
         name: 'Test Channel',
@@ -32,11 +32,12 @@ describe('CatenoidService', () => {
       };
 
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = mock.fn(async () =>
-        new Response(JSON.stringify(mockResponse), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        }),
+      globalThis.fetch = mock.fn(
+        () =>
+          new Response(JSON.stringify(mockResponse), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
       ) as unknown as typeof fetch;
 
       try {
@@ -49,10 +50,10 @@ describe('CatenoidService', () => {
       }
     });
 
-    it('should throw on API error', async () => {
+    void it('should throw on API error', async () => {
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = mock.fn(async () =>
-        new Response('Unauthorized', { status: 401 }),
+      globalThis.fetch = mock.fn(
+        () => new Response('Unauthorized', { status: 401 }),
       ) as unknown as typeof fetch;
 
       try {
@@ -69,8 +70,8 @@ describe('CatenoidService', () => {
     });
   });
 
-  describe('getUploadToken', () => {
-    it('should return upload URL and token', async () => {
+  void describe('getUploadToken', () => {
+    void it('should return upload URL and token', async () => {
       const mockResponse = {
         upload_url: 'https://upload.kollus.com/upload',
         upload_token: 'tok-xyz',
@@ -78,11 +79,12 @@ describe('CatenoidService', () => {
       };
 
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = mock.fn(async () =>
-        new Response(JSON.stringify(mockResponse), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        }),
+      globalThis.fetch = mock.fn(
+        () =>
+          new Response(JSON.stringify(mockResponse), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
       ) as unknown as typeof fetch;
 
       try {
@@ -95,8 +97,8 @@ describe('CatenoidService', () => {
     });
   });
 
-  describe('getLiveChannel', () => {
-    it('should fetch channel details by key', async () => {
+  void describe('getLiveChannel', () => {
+    void it('should fetch channel details by key', async () => {
       const mockResponse = {
         key: 'ch-456',
         name: 'Live Math',
@@ -106,11 +108,12 @@ describe('CatenoidService', () => {
       };
 
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = mock.fn(async () =>
-        new Response(JSON.stringify(mockResponse), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        }),
+      globalThis.fetch = mock.fn(
+        () =>
+          new Response(JSON.stringify(mockResponse), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
       ) as unknown as typeof fetch;
 
       try {

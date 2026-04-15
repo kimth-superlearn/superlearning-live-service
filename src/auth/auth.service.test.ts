@@ -2,8 +2,8 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import * as argon2 from 'argon2';
 
-describe('AuthService - argon2 hashing', () => {
-  it('should hash and verify a password correctly', async () => {
+void describe('AuthService - argon2 hashing', () => {
+  void it('should hash and verify a password correctly', async () => {
     const password = 'testPassword123!';
     const hash = await argon2.hash(password);
 
@@ -14,7 +14,7 @@ describe('AuthService - argon2 hashing', () => {
     assert.equal(isValid, true);
   });
 
-  it('should reject an incorrect password', async () => {
+  void it('should reject an incorrect password', async () => {
     const password = 'correctPassword';
     const hash = await argon2.hash(password);
 
@@ -22,7 +22,7 @@ describe('AuthService - argon2 hashing', () => {
     assert.equal(isValid, false);
   });
 
-  it('should produce different hashes for the same password (salting)', async () => {
+  void it('should produce different hashes for the same password (salting)', async () => {
     const password = 'samePassword';
     const hash1 = await argon2.hash(password);
     const hash2 = await argon2.hash(password);
