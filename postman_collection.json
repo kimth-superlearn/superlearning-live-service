@@ -1,0 +1,156 @@
+{
+  "info": {
+    "name": "SuperLearning Live Service",
+    "description": "API collection for SuperLearning Live Service with Catenoid (Kollus) integration",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000" },
+    { "key": "accessToken", "value": "" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Register",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/auth/register",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@superlearn.ing\",\n  \"password\": \"strongPassword123\",\n  \"name\": \"Test User\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "pm.collectionVariables.set('accessToken', jsonData.accessToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/auth/login",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@superlearn.ing\",\n  \"password\": \"strongPassword123\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Live",
+      "item": [
+        {
+          "name": "Create Live Channel",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/media/live/channels",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Math Class Live Session\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Get Live Channel",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/media/live/channels/CHANNEL_KEY_HERE"
+          }
+        }
+      ]
+    },
+    {
+      "name": "VOD",
+      "item": [
+        {
+          "name": "List VOD Contents",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/media/vod?page=1&perPage=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["media", "vod"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "perPage", "value": "20" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Request Upload Token",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/media/vod/upload-token",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Lecture 01 - Introduction\",\n  \"description\": \"First lecture of the course\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Generate Play Token (Kollus JWT)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/media/vod/play-token",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"videoContentId\": 1\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Webhook",
+      "item": [
+        {
+          "name": "Transcode Callback",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "url": "{{baseUrl}}/media/webhook/transcode",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"media_content_key\": \"MEDIA_KEY_HERE\",\n  \"status\": \"completed\",\n  \"duration\": 3600,\n  \"thumbnail_url\": \"https://example.com/thumb.jpg\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Stream",
+      "item": [
+        {
+          "name": "Stream Local File",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "url": "{{baseUrl}}/media/stream/sample.mp4"
+          }
+        }
+      ]
+    }
+  ]
+}

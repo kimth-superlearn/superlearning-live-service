@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: sl-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: superlearning_live
+      MYSQL_USER: superlearning
+      MYSQL_PASSWORD: superlearning
+    ports:
+      - '3306:3306'
+    volumes:
+      - mysql_data:/var/lib/mysql
+    command: --default-authentication-plugin=caching_sha2_password
+
+  mongo:
+    image: mongo:7
+    container_name: sl-mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: superlearning
+      MONGO_INITDB_ROOT_PASSWORD: superlearning
+      MONGO_INITDB_DATABASE: superlearning_live
+    ports:
+      - '27017:27017'
+    volumes:
+      - mongo_data:/data/db
+
+  redis:
+    image: redis:7-alpine
+    container_name: sl-redis
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+
+volumes:
+  mysql_data:
+  mongo_data:
+  redis_data:

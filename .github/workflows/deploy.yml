@@ -1,0 +1,470 @@
+name: Deploy Live Service
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_env:
+        description: Target environment
+        required: true
+        type: choice
+        options:
+          - DEV
+          - PROD
+      deploy_strategy:
+        description: "Deployment strategy (DEV: auto/rolling/fast, PROD forced to rolling)"
+        required: false
+        type: choice
+        options:
+          - auto
+          - rolling
+          - fast
+        default: auto
+      release_id:
+        description: "Optional release identifier (defaults to short commit SHA)"
+        required: false
+        type: string
+
+jobs:
+  deploy:
+    runs-on:
+      - self-hosted
+      - dogok-x86
+    environment: ${{ inputs.target_env }}
+    permissions:
+      contents: read
+    concurrency:
+      group: live-service-deploy-${{ inputs.target_env }}
+      cancel-in-progress: false
+
+    env:
+      # --- OCI infrastructure ---
+      OCI_REGION: ${{ vars.OCI_REGION }}
+      OCI_COMPARTMENT_ID: ${{ vars.OCI_COMPARTMENT_ID }}
+      OCI_TENANCY_OCID: ${{ vars.OCI_TENANCY_OCID }}
+      OCI_CLI_USER_OCID: ${{ vars.OCI_CLI_USER_OCID }}
+      OCI_CLI_FINGERPRINT: ${{ vars.OCI_CLI_FINGERPRINT }}
+      OCI_CLI_PRIV_KEY: ${{ secrets.OCI_CLI_PRIV_KEY }}
+      OCI_OCIR_USERNAME: ${{ vars.OCI_OCIR_USERNAME }}
+      OCI_OCIR_AUTH_TOKEN: ${{ secrets.OCI_OCIR_AUTH_TOKEN }}
+      OCI_INSTANCE_POOL_ID: ${{ vars.LIVE_INSTANCE_POOL_ID }}
+      OCI_INSTANCE_CONFIGURATION_ID: ${{ vars.LIVE_INSTANCE_CONFIGURATION_ID }}
+      # --- Rolling update ---
+      HEALTH_CHECK_WAIT_TIME: ${{ vars.LIVE_HEALTH_CHECK_WAIT_TIME || '180' }}
+      COOLDOWN_TIME: ${{ vars.LIVE_COOLDOWN_TIME || '60' }}
+      FINAL_POOL_SIZE: ${{ vars.LIVE_FINAL_POOL_SIZE || '1' }}
+      # --- Fast deploy SSH ---
+      SSH_USER: ${{ vars.LIVE_SSH_USER }}
+      SSH_PORT: ${{ vars.LIVE_SSH_PORT || '22' }}
+      SSH_KEY: ${{ secrets.LIVE_SSH_KEY }}
+      SSH_PROXY_JUMP: ${{ vars.SSH_PROXY_JUMP }}
+      SSH_PROXY_KEY: ${{ secrets.LIVE_SSH_PROXY_KEY }}
+      # --- Application ---
+      NODE_ENV: ${{ vars.NODE_ENV || 'production' }}
+      APP_PORT: ${{ vars.LIVE_PORT || '3000' }}
+      APP_MYSQL_HOST: ${{ vars.MYSQL_HOST }}
+      APP_MYSQL_PORT: ${{ vars.MYSQL_PORT || '3306' }}
+      APP_MYSQL_USER: ${{ vars.MYSQL_USER }}
+      APP_MYSQL_PASSWORD: ${{ secrets.MYSQL_PASSWORD }}
+      APP_MYSQL_DATABASE: ${{ vars.MYSQL_DATABASE }}
+      APP_MONGO_URI: ${{ secrets.MONGO_URI }}
+      APP_REDIS_HOST: ${{ vars.REDIS_HOST }}
+      APP_REDIS_PORT: ${{ vars.REDIS_PORT || '6379' }}
+      APP_JWT_SECRET: ${{ secrets.JWT_SECRET }}
+      APP_JWT_EXPIRES_IN: ${{ vars.JWT_EXPIRES_IN || '1h' }}
+      APP_CATENOID_API_BASE_URL: ${{ vars.CATENOID_API_BASE_URL }}
+      APP_CATENOID_SERVICE_ACCOUNT_KEY: ${{ secrets.CATENOID_SERVICE_ACCOUNT_KEY }}
+      APP_CATENOID_API_ACCESS_TOKEN: ${{ secrets.CATENOID_API_ACCESS_TOKEN }}
+      APP_CATENOID_CUSTOM_KEY: ${{ secrets.CATENOID_CUSTOM_KEY }}
+      APP_CATENOID_SECURITY_KEY: ${{ secrets.CATENOID_SECURITY_KEY }}
+
+    steps:
+      # ── Meta ──────────────────────────────────────────────
+      - name: Resolve deploy version
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          COMMIT_SHA_SHORT="${GITHUB_SHA::7}"
+          RELEASE_ID="${{ inputs.release_id }}"
+          IMAGE_TAG="${RELEASE_ID:-$COMMIT_SHA_SHORT}"
+          ENV_TAG=$(echo "${{ inputs.target_env }}" | tr '[:upper:]' '[:lower:]')
+
+          echo "version=$COMMIT_SHA_SHORT" >> "$GITHUB_OUTPUT"
+          echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+          echo "env_tag=$ENV_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve deployment strategy
+        id: strategy
+        shell: bash
+        run: |
+          set -euo pipefail
+          TARGET_ENV='${{ inputs.target_env }}'
+          INPUT_STRATEGY='${{ inputs.deploy_strategy }}'
+
+          if [[ "$TARGET_ENV" == "PROD" ]]; then
+            STRATEGY="rolling"
+          elif [[ "$INPUT_STRATEGY" == "auto" ]]; then
+            STRATEGY="fast"
+          else
+            STRATEGY="$INPUT_STRATEGY"
+          fi
+
+          echo "strategy=$STRATEGY" >> "$GITHUB_OUTPUT"
+          echo "Resolved strategy: $STRATEGY (target_env=$TARGET_ENV, input=$INPUT_STRATEGY)"
+
+      # ── Validate ──────────────────────────────────────────
+      - name: Validate required variables
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          check_var() {
+            if [[ -z "${!1:-}" ]]; then
+              echo "[ERROR] $1 is required"
+              missing=1
+            fi
+          }
+
+          # OCI infra
+          check_var OCI_REGION
+          check_var OCI_COMPARTMENT_ID
+          check_var OCI_TENANCY_OCID
+          check_var OCI_CLI_USER_OCID
+          check_var OCI_CLI_FINGERPRINT
+          check_var OCI_CLI_PRIV_KEY
+          check_var OCI_OCIR_USERNAME
+          check_var OCI_OCIR_AUTH_TOKEN
+          check_var OCI_INSTANCE_POOL_ID
+
+          # App
+          check_var APP_MYSQL_HOST
+          check_var APP_MYSQL_USER
+          check_var APP_MYSQL_PASSWORD
+          check_var APP_MYSQL_DATABASE
+          check_var APP_JWT_SECRET
+
+          if [[ "$missing" -ne 0 ]]; then
+            exit 1
+          fi
+
+      - name: Validate fast deploy SSH variables
+        if: steps.strategy.outputs.strategy == 'fast'
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${SSH_USER:-}" ]] || { echo "[ERROR] LIVE_SSH_USER is required for fast deploy"; exit 1; }
+          [[ -n "${SSH_KEY:-}" ]] || { echo "[ERROR] LIVE_SSH_KEY is required for fast deploy"; exit 1; }
+
+      # ── Checkout & Build ──────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build NestJS application
+        run: npm run build
+
+      # ── OCI CLI ───────────────────────────────────────────
+      - name: Install OCI CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          OCI_CANDIDATES=(
+            "$(command -v oci || true)"
+            "$HOME/bin/oci"
+            "$HOME/lib/oracle-cli/bin/oci"
+            "/home/classday/lib/oracle-cli/bin/oci"
+          )
+
+          for candidate in "${OCI_CANDIDATES[@]}"; do
+            if [[ -n "${candidate}" && -x "${candidate}" ]]; then
+              echo "Using existing OCI CLI: ${candidate}"
+              echo "$(dirname "${candidate}")" >> "$GITHUB_PATH"
+              export PATH="$(dirname "${candidate}"):$PATH"
+              oci --version
+              exit 0
+            fi
+          done
+
+          bash -c "$(curl -fsSL https://raw.githubusercontent.com/oracle/oci-cli/master/scripts/install/install.sh)" -- --accept-all-defaults
+
+          if [[ -x "$HOME/bin/oci" ]]; then
+            echo "$HOME/bin" >> "$GITHUB_PATH"
+          elif [[ -x "$HOME/lib/oracle-cli/bin/oci" ]]; then
+            echo "$HOME/lib/oracle-cli/bin" >> "$GITHUB_PATH"
+          fi
+
+          oci --version
+
+      - name: Configure OCI CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.oci"
+          cat > "$HOME/.oci/config" <<EOF
+          [DEFAULT]
+          user=${OCI_CLI_USER_OCID}
+          fingerprint=${OCI_CLI_FINGERPRINT}
+          tenancy=${OCI_TENANCY_OCID}
+          region=${OCI_REGION}
+          key_file=$HOME/.oci/oci_api_key.pem
+          EOF
+          printf '%s\n' "$OCI_CLI_PRIV_KEY" > "$HOME/.oci/oci_api_key.pem"
+          chmod 600 "$HOME/.oci/oci_api_key.pem" "$HOME/.oci/config"
+
+      - name: OCI CLI auth check
+        id: oci
+        shell: bash
+        run: |
+          set -euo pipefail
+          NAMESPACE=$(oci os ns get --auth api_key --query 'data' --raw-output)
+          [[ -n "$NAMESPACE" ]] || { echo "[ERROR] OCI namespace resolve failed"; exit 1; }
+          echo "namespace=$NAMESPACE" >> "$GITHUB_OUTPUT"
+
+      # ── Docker Build & Push ───────────────────────────────
+      - name: Login to OCIR
+        shell: bash
+        run: |
+          set -euo pipefail
+          OCIR_LOGIN_USER="$OCI_OCIR_USERNAME"
+          if [[ "$OCIR_LOGIN_USER" != */* ]]; then
+            OCIR_LOGIN_USER="${{ steps.oci.outputs.namespace }}/$OCIR_LOGIN_USER"
+          fi
+          printf '%s' "$OCI_OCIR_AUTH_TOKEN" | docker login "${OCI_REGION}.ocir.io" -u "$OCIR_LOGIN_USER" --password-stdin
+
+      - name: Build Docker image
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE_REPO="${{ steps.meta.outputs.env_tag }}-live-service-repo"
+          IMAGE_BASE="${OCI_REGION}.ocir.io/${{ steps.oci.outputs.namespace }}/${IMAGE_REPO}"
+          VERSION_IMAGE="$IMAGE_BASE:${{ steps.meta.outputs.image_tag }}"
+          ENV_IMAGE="$IMAGE_BASE:latest"
+
+          docker build \
+            --build-arg GIT_SHA="${GITHUB_SHA}" \
+            --build-arg PORT="$APP_PORT" \
+            --build-arg NODE_ENV="$NODE_ENV" \
+            --build-arg MYSQL_HOST="$APP_MYSQL_HOST" \
+            --build-arg MYSQL_PORT="$APP_MYSQL_PORT" \
+            --build-arg MYSQL_USER="$APP_MYSQL_USER" \
+            --build-arg MYSQL_PASSWORD="$APP_MYSQL_PASSWORD" \
+            --build-arg MYSQL_DATABASE="$APP_MYSQL_DATABASE" \
+            --build-arg MONGO_URI="$APP_MONGO_URI" \
+            --build-arg REDIS_HOST="$APP_REDIS_HOST" \
+            --build-arg REDIS_PORT="$APP_REDIS_PORT" \
+            --build-arg JWT_SECRET="$APP_JWT_SECRET" \
+            --build-arg JWT_EXPIRES_IN="$APP_JWT_EXPIRES_IN" \
+            --build-arg CATENOID_API_BASE_URL="$APP_CATENOID_API_BASE_URL" \
+            --build-arg CATENOID_SERVICE_ACCOUNT_KEY="$APP_CATENOID_SERVICE_ACCOUNT_KEY" \
+            --build-arg CATENOID_API_ACCESS_TOKEN="$APP_CATENOID_API_ACCESS_TOKEN" \
+            --build-arg CATENOID_CUSTOM_KEY="$APP_CATENOID_CUSTOM_KEY" \
+            --build-arg CATENOID_SECURITY_KEY="$APP_CATENOID_SECURITY_KEY" \
+            -t "$VERSION_IMAGE" \
+            -t "$ENV_IMAGE" \
+            .
+
+          echo "version_image=$VERSION_IMAGE" >> "$GITHUB_OUTPUT"
+          echo "env_image=$ENV_IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Push Docker image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker push "${{ steps.image.outputs.version_image }}"
+          docker push "${{ steps.image.outputs.env_image }}"
+
+      # ── Fast Deploy (SSH) ─────────────────────────────────
+      - name: Configure SSH for fast deploy
+        if: steps.strategy.outputs.strategy == 'fast'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$SSH_KEY" > "$HOME/.ssh/live_deploy_key"
+          chmod 600 "$HOME/.ssh/live_deploy_key"
+
+          PROXY_KEY_PATH="$HOME/.ssh/live_deploy_key"
+          PJ_USER=""
+          PJ_HOST=""
+
+          if [[ -n "${SSH_PROXY_JUMP:-}" ]]; then
+            PJ_USER="${SSH_PROXY_JUMP%@*}"
+            PJ_HOST="${SSH_PROXY_JUMP#*@}"
+            if [[ "$PJ_USER" == "$SSH_PROXY_JUMP" || -z "$PJ_HOST" ]]; then
+              echo "[ERROR] SSH_PROXY_JUMP must be in user@host format"
+              exit 1
+            fi
+
+            if [[ -n "${SSH_PROXY_KEY:-}" ]]; then
+              printf '%s\n' "$SSH_PROXY_KEY" > "$HOME/.ssh/live_proxy_key"
+              chmod 600 "$HOME/.ssh/live_proxy_key"
+              PROXY_KEY_PATH="$HOME/.ssh/live_proxy_key"
+            fi
+          fi
+
+          cat > "$HOME/.ssh/config" <<EOF
+          Host live-target-*
+            User $SSH_USER
+            Port $SSH_PORT
+            IdentityFile $HOME/.ssh/live_deploy_key
+            StrictHostKeyChecking accept-new
+          EOF
+
+          if [[ -n "${SSH_PROXY_JUMP:-}" ]]; then
+            cat >> "$HOME/.ssh/config" <<EOF
+
+          Host live-bastion
+            HostName $PJ_HOST
+            User $PJ_USER
+            IdentityFile $PROXY_KEY_PATH
+            StrictHostKeyChecking accept-new
+
+          Host live-target-*
+            ProxyJump live-bastion
+          EOF
+          fi
+
+          chmod 600 "$HOME/.ssh/config"
+
+      - name: Fast deploy via SSH restart
+        if: steps.strategy.outputs.strategy == 'fast'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t INSTANCE_IDS < <(
+            oci compute-management instance-pool list-instances \
+              --instance-pool-id "$OCI_INSTANCE_POOL_ID" \
+              --compartment-id "$OCI_COMPARTMENT_ID" \
+              --all \
+            | python3 -c 'import sys,json; d=json.load(sys.stdin).get("data", []); [print(i["id"]) for i in d if i.get("state") == "Running"]'
+          )
+
+          if [[ ${#INSTANCE_IDS[@]} -eq 0 ]]; then
+            echo "[ERROR] No running instances found in instance pool"
+            exit 1
+          fi
+
+          mapfile -t TARGET_IPS < <(
+            for instance_id in "${INSTANCE_IDS[@]}"; do
+              oci compute instance list-vnics \
+                --instance-id "$instance_id" \
+                --query 'data[0]."private-ip"' \
+                --raw-output
+            done
+          )
+
+          echo "Restart target count: ${#TARGET_IPS[@]}"
+
+          pids=()
+          idx=0
+          for ip in "${TARGET_IPS[@]}"; do
+            idx=$((idx + 1))
+            target_host="live-target-$idx"
+            (
+              ssh -F "$HOME/.ssh/config" \
+                -o ConnectTimeout=10 \
+                -o HostName="$ip" \
+                "$target_host" \
+                'set -euo pipefail; sudo systemctl restart superlearning-live-service; sudo systemctl is-active superlearning-live-service'
+              echo "[OK] restart succeeded: $ip"
+            ) &
+            pids+=("$!")
+          done
+
+          failed=0
+          for pid in "${pids[@]}"; do
+            if ! wait "$pid"; then
+              failed=1
+            fi
+          done
+
+          if [[ "$failed" -ne 0 ]]; then
+            echo "[ERROR] One or more SSH restarts failed"
+            exit 1
+          fi
+
+      # ── Rolling Deploy ────────────────────────────────────
+      - name: Rolling update instance pool
+        if: steps.strategy.outputs.strategy == 'rolling'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Updating instance pool configuration..."
+          if [[ -n "${OCI_INSTANCE_CONFIGURATION_ID:-}" ]]; then
+            oci compute-management instance-pool update \
+              --instance-pool-id "$OCI_INSTANCE_POOL_ID" \
+              --instance-configuration-id "$OCI_INSTANCE_CONFIGURATION_ID" \
+              --force
+            echo "Instance configuration updated"
+          fi
+
+          CURRENT_SIZE=$(oci compute-management instance-pool get \
+            --instance-pool-id "$OCI_INSTANCE_POOL_ID" \
+            --query 'data.size' \
+            --raw-output)
+          echo "Current pool size: $CURRENT_SIZE"
+
+          NEW_SIZE=$((CURRENT_SIZE + 1))
+          echo "Scaling up to $NEW_SIZE..."
+          oci compute-management instance-pool update \
+            --instance-pool-id "$OCI_INSTANCE_POOL_ID" \
+            --size "$NEW_SIZE"
+
+          echo "Waiting ${HEALTH_CHECK_WAIT_TIME}s for new instance to become healthy..."
+          sleep "$HEALTH_CHECK_WAIT_TIME"
+
+          TARGET_SIZE="${FINAL_POOL_SIZE:-$CURRENT_SIZE}"
+          echo "Scaling down to $TARGET_SIZE..."
+          oci compute-management instance-pool update \
+            --instance-pool-id "$OCI_INSTANCE_POOL_ID" \
+            --size "$TARGET_SIZE"
+
+          echo "Cooldown ${COOLDOWN_TIME}s..."
+          sleep "$COOLDOWN_TIME"
+
+          echo "Rolling update completed"
+
+      # ── Cleanup ───────────────────────────────────────────
+      - name: Cleanup credentials
+        if: always()
+        shell: bash
+        run: |
+          rm -f "$HOME/.oci/oci_api_key.pem" "$HOME/.oci/config"
+          rm -f "$HOME/.ssh/live_deploy_key" "$HOME/.ssh/live_proxy_key"
+          docker logout "${OCI_REGION}.ocir.io" 2>/dev/null || true
+
+      - name: Cleanup Docker
+        if: always()
+        shell: bash
+        run: |
+          docker image prune -f --filter "until=24h" 2>/dev/null || true
+          docker builder prune -f --filter "until=72h" 2>/dev/null || true
+
+      # ── Summary ───────────────────────────────────────────
+      - name: Deployment summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Live Service Deployment"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| target_env | ${{ inputs.target_env }} |"
+            echo "| strategy | ${{ steps.strategy.outputs.strategy }} |"
+            echo "| image_tag | ${{ steps.meta.outputs.image_tag }} |"
+            echo "| commit | ${{ steps.meta.outputs.version }} |"
+            echo "| status | ${{ job.status }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
